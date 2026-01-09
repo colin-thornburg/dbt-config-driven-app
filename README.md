@@ -4,6 +4,40 @@ A full-stack application that makes it easy to onboard new clients to your data 
 
 ---
 
+## 📁 Repository Structure (Important!)
+
+This repository uses a **Git submodule** to link to the dbt project:
+
+```
+dbt-config-driven-app/              ← This repository (you are here)
+├── src/                            ← React frontend
+├── api/                            ← Express API
+├── config-driven-dbt/              ← Git submodule (separate repo)
+│   └── → github.com/colin-thornburg/config-driven-dbt
+└── README.md                       ← This file
+```
+
+**What is `config-driven-dbt @ d5a1117`?**
+
+The `config-driven-dbt` folder is a **Git submodule** - it's a pointer to a separate repository at:
+**https://github.com/colin-thornburg/config-driven-dbt**
+
+The `@ d5a1117` shows which commit of that repository is being used. This allows the dbt project to:
+- ✅ Have its own Git history and version control
+- ✅ Be updated independently from the frontend/API
+- ✅ Be used in other projects if needed
+
+**When cloning this repo**, use:
+```bash
+# Clone with submodule in one command
+git clone --recursive https://github.com/colin-thornburg/dbt-config-driven-app.git
+
+# Or if already cloned without submodule:
+git submodule update --init --recursive
+```
+
+---
+
 ## 🎯 What Problem Does This Solve?
 
 **The Old Way:**
