@@ -1,0 +1,3 @@
+[submodule "config-driven-dbt"]
+	path = config-driven-dbt
+	url = https://github.com/colin-thornburg/config-driven-dbt.git
