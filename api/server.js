@@ -21,6 +21,10 @@ const DBT_PROJECT_PATH = path.join(__dirname, '..', 'config-driven-dbt');
 const CLIENT_MAPPINGS_PATH = path.join(DBT_PROJECT_PATH, 'models', 'staging', 'client_mappings');
 const SEEDS_PATH = path.join(DBT_PROJECT_PATH, 'seeds', 'raw_clients');
 
+// Platform Entity paths
+const PLATFORM_DEMO_SEEDS_PATH = path.join(DBT_PROJECT_PATH, 'seeds', 'platform_demo');
+const PLATFORM_MODELS_PATH = path.join(DBT_PROJECT_PATH, 'models', 'platform_demo');
+
 // Initialize git
 const git = simpleGit(DBT_PROJECT_PATH);
 
@@ -362,6 +366,452 @@ app.post('/api/reset-demo', async (req, res) => {
       error: 'Failed to reset demo data', 
       details: error.message 
     });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PLATFORM ENTITY DESIGNER API ENDPOINTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Entity type definitions with their control fields
+const ENTITY_TYPES = {
+  dimension: {
+    name: 'Dimension',
+    description: 'Slowly Changing Dimension (SCD Type 2) with automatic surrogate keys and validity tracking',
+    controlFields: ['_surrogate_key', '_valid_from', '_valid_to', '_is_current', '_loaded_at', '_source_schema', '_model_name', '_dbt_run_id'],
+    icon: '📊',
+    color: '#4F46E5'
+  },
+  fact: {
+    name: 'Fact Table',
+    description: 'Transactional fact table with CDC tracking and incremental processing support',
+    controlFields: ['_transaction_time', '_ingestion_time', '_source_system', '_loaded_at', '_source_schema', '_model_name', '_dbt_run_id'],
+    icon: '📈',
+    color: '#059669'
+  },
+  bridge: {
+    name: 'Bridge Table',
+    description: 'Many-to-many relationship bridge with link validity tracking',
+    controlFields: ['_relationship_created_at', '_is_active', '_loaded_at', '_source_schema', '_model_name', '_dbt_run_id'],
+    icon: '🔗',
+    color: '#D97706'
+  },
+  snapshot: {
+    name: 'Snapshot',
+    description: 'Point-in-time snapshot for tracking historical state',
+    controlFields: ['_snapshot_date', '_snapshot_timestamp', '_loaded_at', '_source_schema', '_model_name', '_dbt_run_id'],
+    icon: '📸',
+    color: '#7C3AED'
+  },
+  staging: {
+    name: 'Staging',
+    description: 'Minimal transformation layer with basic lineage tracking',
+    controlFields: ['_layer', '_loaded_at', '_source_schema', '_model_name', '_dbt_run_id'],
+    icon: '📥',
+    color: '#6B7280'
+  }
+};
+
+// Relationship cardinality types
+const CARDINALITY_TYPES = [
+  { value: 'one_to_one', label: 'One-to-One (1:1)', description: 'Each record in A relates to exactly one record in B' },
+  { value: 'one_to_many', label: 'One-to-Many (1:N)', description: 'Each record in A can relate to multiple records in B' },
+  { value: 'many_to_one', label: 'Many-to-One (N:1)', description: 'Multiple records in A relate to one record in B' },
+  { value: 'many_to_many', label: 'Many-to-Many (N:M)', description: 'Multiple records in A relate to multiple records in B (requires bridge table)' }
+];
+
+// Get entity type definitions
+app.get('/api/platform/entity-types', (req, res) => {
+  res.json(ENTITY_TYPES);
+});
+
+// Get cardinality types
+app.get('/api/platform/cardinality-types', (req, res) => {
+  res.json(CARDINALITY_TYPES);
+});
+
+// Get available platform sources (seed files)
+app.get('/api/platform/sources', async (req, res) => {
+  try {
+    const seedFiles = await fs.readdir(PLATFORM_DEMO_SEEDS_PATH);
+    const csvFiles = seedFiles.filter(f => f.endsWith('.csv'));
+    
+    const sources = {
+      platform_demo: csvFiles.map(f => f.replace('.csv', ''))
+    };
+    
+    res.json(sources);
+  } catch (error) {
+    console.error('Error reading platform sources:', error);
+    res.status(500).json({ error: 'Failed to read platform sources' });
+  }
+});
+
+// Get source schema (columns) for a platform table
+app.get('/api/platform/sources/:table/schema', async (req, res) => {
+  try {
+    const { table } = req.params;
+    const csvPath = path.join(PLATFORM_DEMO_SEEDS_PATH, `${table}.csv`);
+    
+    // Read the CSV header to get column names
+    const content = await fs.readFile(csvPath, 'utf-8');
+    const lines = content.split('\n');
+    const headers = lines[0].split(',').map(h => h.trim());
+    
+    // Get sample data from first data row
+    const sampleRow = lines[1]?.split(',').map(v => v.trim()) || [];
+    
+    // Infer data types from sample values
+    const fields = headers.map((name, idx) => {
+      const sample = sampleRow[idx] || '';
+      let inferredType = 'varchar';
+      
+      // Simple type inference
+      if (/^\d+$/.test(sample)) inferredType = 'integer';
+      else if (/^\d+\.\d+$/.test(sample)) inferredType = 'decimal';
+      else if (/^\d{4}-\d{2}-\d{2}/.test(sample)) inferredType = 'timestamp';
+      else if (sample === 'true' || sample === 'false') inferredType = 'boolean';
+      
+      return {
+        name,
+        type: inferredType,
+        sample,
+        nullable: true
+      };
+    });
+    
+    res.json(fields);
+  } catch (error) {
+    console.error('Error reading platform source schema:', error);
+    res.status(500).json({ error: 'Failed to read source schema' });
+  }
+});
+
+// Get existing platform entities (by reading model YAML)
+app.get('/api/platform/entities', async (req, res) => {
+  try {
+    // Check if platform_demo.yml exists
+    const ymlPath = path.join(PLATFORM_MODELS_PATH, 'platform_demo.yml');
+    
+    try {
+      const content = await fs.readFile(ymlPath, 'utf-8');
+      const data = yaml.load(content);
+      
+      const entities = (data.models || []).map(model => ({
+        name: model.name,
+        description: model.description,
+        entityType: model.meta?.platform?.entity_type || 'unknown',
+        primaryKey: model.meta?.platform?.primary_key,
+        relationships: model.meta?.platform?.relationships || [],
+        columns: model.columns?.map(c => c.name) || []
+      }));
+      
+      res.json(entities);
+    } catch (e) {
+      // No entities file yet
+      res.json([]);
+    }
+  } catch (error) {
+    console.error('Error reading platform entities:', error);
+    res.status(500).json({ error: 'Failed to read platform entities' });
+  }
+});
+
+// Helper to generate SQL model for platform entity
+function generatePlatformModelSQL(entity) {
+  const { entityType, modelName, sourceTable, primaryKey, columns, relationships, cdcConfig } = entity;
+  
+  let platformParams = [`entity_type='${entityType}'`];
+  
+  if (entityType === 'dimension') {
+    platformParams.push(`primary_key='${primaryKey}'`);
+    if (cdcConfig?.sourceColumn) {
+      platformParams.push(`source_cdc_column='${cdcConfig.sourceColumn}'`);
+    }
+  } else if (entityType === 'fact') {
+    if (cdcConfig?.transactionTimeColumn) {
+      platformParams.push(`transaction_time_column='${cdcConfig.transactionTimeColumn}'`);
+    }
+    if (cdcConfig?.ingestionTimeColumn) {
+      platformParams.push(`ingestion_time_column='${cdcConfig.ingestionTimeColumn}'`);
+    }
+    if (cdcConfig?.sourceSystem) {
+      platformParams.push(`source_system='${cdcConfig.sourceSystem}'`);
+    }
+  }
+  
+  // Build column selections
+  const columnSelections = columns.map(col => {
+    if (col.expression && col.expression !== col.sourceColumn) {
+      return `    ${col.expression} AS ${col.targetColumn}`;
+    }
+    return `    ${col.sourceColumn}`;
+  }).join(',\n');
+  
+  // Generate relationship comments
+  let relationshipComments = '';
+  if (relationships && relationships.length > 0) {
+    relationshipComments = '\n    -- Relationships (defined in schema.yml)\n' +
+      relationships.map(r => `    -- ${r.joinKey} -> ${r.targetEntity} (${r.cardinality})`).join('\n') + '\n';
+  }
+  
+  const sql = `{{
+    config(
+        materialized='${ entityType === 'fact' ? 'incremental' : 'table' }',
+        ${entityType === 'fact' ? "unique_key='" + primaryKey + "'," : ''}
+        tags=['platform_demo', '${entityType}']
+    )
+}}
+
+{#
+    ════════════════════════════════════════════════════════════════════════════
+    ${entityType.toUpperCase()}: ${modelName}
+    ════════════════════════════════════════════════════════════════════════════
+    
+    Generated by Platform Entity Designer
+    Created: ${new Date().toISOString()}
+    
+    This model uses the Platform Entity pattern which automatically injects
+    control fields based on the entity type (${entityType}).
+    
+    ════════════════════════════════════════════════════════════════════════════
+#}
+
+{{ platform_entity(
+    ${platformParams.join(',\n    ')}
+) }}
+
+SELECT${relationshipComments}
+${columnSelections}
+
+FROM {{ ref('${sourceTable}') }}
+${entityType === 'fact' ? `
+{% if is_incremental() %}
+    WHERE ${cdcConfig?.transactionTimeColumn || 'updated_at'} > (SELECT MAX(_transaction_time) FROM {{ this }})
+{% endif %}
+` : ''}
+{{ platform_entity_end() }}
+`;
+  
+  return sql;
+}
+
+// Helper to generate schema YAML for platform entity
+function generatePlatformEntityYAML(entity) {
+  const { entityType, modelName, description, primaryKey, columns, relationships, cdcConfig } = entity;
+  
+  // Build platform meta section
+  const platformMeta = {
+    entity_type: entityType,
+    primary_key: primaryKey
+  };
+  
+  if (entityType === 'dimension') {
+    platformMeta.scd_type = 2;
+    platformMeta.track_changes_on = columns
+      .filter(c => c.trackChanges)
+      .map(c => c.targetColumn || c.sourceColumn);
+  }
+  
+  if (entityType === 'fact' && cdcConfig) {
+    platformMeta.cdc_config = {
+      transaction_time_column: cdcConfig.transactionTimeColumn,
+      ingestion_time_column: cdcConfig.ingestionTimeColumn,
+      source_system: cdcConfig.sourceSystem
+    };
+  }
+  
+  if (relationships && relationships.length > 0) {
+    platformMeta.relationships = relationships.map(r => ({
+      target: r.targetEntity,
+      join_key: r.joinKey,
+      cardinality: r.cardinality,
+      required: r.required || false,
+      description: r.description || `Relationship to ${r.targetEntity}`
+    }));
+  }
+  
+  // Build column definitions
+  const columnDefs = columns.map(col => {
+    const colDef = {
+      name: col.targetColumn || col.sourceColumn,
+      description: col.description || `Column ${col.sourceColumn}`
+    };
+    
+    // Add tests for primary key
+    if ((col.targetColumn || col.sourceColumn) === primaryKey) {
+      colDef.tests = ['unique', 'not_null'];
+    }
+    
+    return colDef;
+  });
+  
+  // Add control field column definitions based on entity type
+  const controlFieldDefs = ENTITY_TYPES[entityType].controlFields.map(field => ({
+    name: field,
+    description: `Platform-managed: ${field.replace(/_/g, ' ').replace(/^_/, '')}`
+  }));
+  
+  return {
+    name: modelName,
+    description: description || `${entityType} entity: ${modelName}`,
+    meta: {
+      platform: platformMeta
+    },
+    columns: [...columnDefs, ...controlFieldDefs]
+  };
+}
+
+// Create new platform entity
+app.post('/api/platform/entities', async (req, res) => {
+  try {
+    const entity = req.body;
+    
+    console.log('📦 Creating platform entity:', entity.modelName);
+    
+    // Validate required fields
+    if (!entity.modelName || !entity.entityType || !entity.sourceTable || !entity.primaryKey) {
+      return res.status(400).json({ 
+        error: 'Missing required fields: modelName, entityType, sourceTable, primaryKey' 
+      });
+    }
+    
+    // Generate SQL model
+    const sqlContent = generatePlatformModelSQL(entity);
+    const sqlFilename = `${entity.modelName}.sql`;
+    const sqlPath = path.join(PLATFORM_MODELS_PATH, sqlFilename);
+    
+    await fs.writeFile(sqlPath, sqlContent, 'utf-8');
+    console.log(`  ✓ Created model: ${sqlFilename}`);
+    
+    // Update or create schema YAML
+    const ymlPath = path.join(PLATFORM_MODELS_PATH, 'platform_demo.yml');
+    let existingYaml = { version: 2, models: [] };
+    
+    try {
+      const existingContent = await fs.readFile(ymlPath, 'utf-8');
+      existingYaml = yaml.load(existingContent);
+    } catch (e) {
+      // File doesn't exist yet
+    }
+    
+    // Generate new entity YAML definition
+    const entityYaml = generatePlatformEntityYAML(entity);
+    
+    // Check if model already exists and update, or add new
+    const existingIndex = existingYaml.models.findIndex(m => m.name === entity.modelName);
+    if (existingIndex >= 0) {
+      existingYaml.models[existingIndex] = entityYaml;
+    } else {
+      existingYaml.models.push(entityYaml);
+    }
+    
+    // Write updated YAML
+    const yamlContent = yaml.dump(existingYaml, {
+      indent: 2,
+      lineWidth: 120,
+      noRefs: true
+    });
+    
+    await fs.writeFile(ymlPath, yamlContent, 'utf-8');
+    console.log('  ✓ Updated platform_demo.yml');
+    
+    // Git operations
+    try {
+      await git.add([
+        `models/platform_demo/${sqlFilename}`,
+        'models/platform_demo/platform_demo.yml'
+      ]);
+      
+      await git.commit(
+        `Add platform entity: ${entity.modelName}\n\n` +
+        `- Type: ${entity.entityType}\n` +
+        `- Source: ${entity.sourceTable}\n` +
+        `- Primary Key: ${entity.primaryKey}\n` +
+        `- Created via Platform Entity Designer`
+      );
+      
+      console.log('  ⬆️  Pushing to remote...');
+      await git.push('origin', 'main');
+      console.log('  ✅ Pushed to origin/main');
+      
+      res.json({
+        success: true,
+        message: 'Platform entity created successfully',
+        modelName: entity.modelName,
+        files: [sqlFilename, 'platform_demo.yml']
+      });
+    } catch (gitError) {
+      console.error('Git error:', gitError);
+      res.json({
+        success: true,
+        message: 'Platform entity created (git commit failed)',
+        modelName: entity.modelName,
+        warning: 'Could not commit to git'
+      });
+    }
+  } catch (error) {
+    console.error('Error creating platform entity:', error);
+    res.status(500).json({ 
+      error: 'Failed to create platform entity', 
+      details: error.message 
+    });
+  }
+});
+
+// Delete platform entity
+app.delete('/api/platform/entities/:name', async (req, res) => {
+  try {
+    const { name } = req.params;
+    
+    console.log('🗑️  Deleting platform entity:', name);
+    
+    // Delete SQL file
+    const sqlPath = path.join(PLATFORM_MODELS_PATH, `${name}.sql`);
+    try {
+      await fs.unlink(sqlPath);
+      console.log(`  ✓ Deleted ${name}.sql`);
+    } catch (e) {
+      // File may not exist
+    }
+    
+    // Update schema YAML to remove the model
+    const ymlPath = path.join(PLATFORM_MODELS_PATH, 'platform_demo.yml');
+    try {
+      const content = await fs.readFile(ymlPath, 'utf-8');
+      const data = yaml.load(content);
+      
+      data.models = (data.models || []).filter(m => m.name !== name);
+      
+      const yamlContent = yaml.dump(data, {
+        indent: 2,
+        lineWidth: 120,
+        noRefs: true
+      });
+      
+      await fs.writeFile(ymlPath, yamlContent, 'utf-8');
+      console.log('  ✓ Updated platform_demo.yml');
+    } catch (e) {
+      // File may not exist
+    }
+    
+    // Git operations
+    try {
+      await git.add([
+        `models/platform_demo/${name}.sql`,
+        'models/platform_demo/platform_demo.yml'
+      ]);
+      
+      await git.commit(`Remove platform entity: ${name}`);
+      await git.push('origin', 'main');
+      
+      res.json({ success: true, message: `Deleted ${name}` });
+    } catch (gitError) {
+      res.json({ success: true, message: `Deleted ${name} (git commit failed)` });
+    }
+  } catch (error) {
+    console.error('Error deleting platform entity:', error);
+    res.status(500).json({ error: 'Failed to delete platform entity' });
   }
 });
 

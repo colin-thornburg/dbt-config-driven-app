@@ -66,6 +66,77 @@ export const api = {
     }
     
     return response.json();
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PLATFORM ENTITY DESIGNER API
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // Get entity type definitions
+  async getEntityTypes() {
+    const response = await fetch(`${API_BASE_URL}/platform/entity-types`);
+    if (!response.ok) throw new Error('Failed to fetch entity types');
+    return response.json();
+  },
+
+  // Get cardinality types for relationships
+  async getCardinalityTypes() {
+    const response = await fetch(`${API_BASE_URL}/platform/cardinality-types`);
+    if (!response.ok) throw new Error('Failed to fetch cardinality types');
+    return response.json();
+  },
+
+  // Get available platform sources (seed files)
+  async getPlatformSources() {
+    const response = await fetch(`${API_BASE_URL}/platform/sources`);
+    if (!response.ok) throw new Error('Failed to fetch platform sources');
+    return response.json();
+  },
+
+  // Get source schema for a platform table
+  async getPlatformSourceSchema(tableName) {
+    const response = await fetch(`${API_BASE_URL}/platform/sources/${tableName}/schema`);
+    if (!response.ok) throw new Error('Failed to fetch source schema');
+    return response.json();
+  },
+
+  // Get all platform entities
+  async getPlatformEntities() {
+    const response = await fetch(`${API_BASE_URL}/platform/entities`);
+    if (!response.ok) throw new Error('Failed to fetch platform entities');
+    return response.json();
+  },
+
+  // Create a new platform entity
+  async createPlatformEntity(entityData) {
+    const response = await fetch(`${API_BASE_URL}/platform/entities`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(entityData),
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to create platform entity');
+    }
+    
+    return response.json();
+  },
+
+  // Delete a platform entity
+  async deletePlatformEntity(name) {
+    const response = await fetch(`${API_BASE_URL}/platform/entities/${name}`, {
+      method: 'DELETE',
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to delete platform entity');
+    }
+    
+    return response.json();
   }
 };
 

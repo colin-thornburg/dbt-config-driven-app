@@ -1,6 +1,15 @@
-# Client Mapping Portal
+# Config-Driven Data Platform
 
-A full-stack application that makes it easy to onboard new clients to your data platform **without writing any SQL or YAML**. Just point, click, and map fields visually - the system generates all the dbt configuration automatically!
+A full-stack application for building and managing dbt data models through visual interfaces - **no SQL or YAML required**. Features two powerful tools:
+
+## 🎯 Two Use Cases, One Platform
+
+| Feature | Client Mapping Portal | Platform Entity Designer |
+|---------|----------------------|--------------------------|
+| **Purpose** | Onboard clients with different data schemas | Define data models with auto-injected control fields |
+| **Target Users** | Data Analysts | Data Engineers / Platform Teams |
+| **Output** | YAML configs for client-specific mappings | dbt models with platform-managed fields |
+| **Key Benefit** | No SQL changes needed per client | Standardized control fields (CDC, SCD2, lineage) |
 
 ---
 
@@ -38,7 +47,9 @@ git submodule update --init --recursive
 
 ---
 
-## 🎯 What Problem Does This Solve?
+## 🎯 What Problems Does This Solve?
+
+### Problem 1: Client Onboarding (Client Mapping Portal)
 
 **The Old Way:**
 - Data analyst gets a new client with a different data format
@@ -47,12 +58,38 @@ git submodule update --init --recursive
 - Manually tests field mappings
 - Repeats for every new client 😫
 
-**The New Way (This App):**
+**The New Way:**
 - Data analyst opens a web portal
 - Selects the client's source table
 - Visually maps fields using drag-and-drop style interface
 - Clicks "Submit" - done! ✨
 - dbt automatically reads the config and builds the models
+
+### Problem 2: Platform Standardization (Platform Entity Designer)
+
+**The Old Way:**
+- Platform team wants standardized control fields (CDC timestamps, surrogate keys, lineage tracking)
+- Developers must remember to add these fields to every model
+- Inconsistent field names and implementations across models
+- No validation that required metadata is present
+- Runtime code can't rely on consistent field structures 😫
+
+**The New Way:**
+- Platform architect defines entity types (dimension, fact, bridge, etc.)
+- Developers use visual wizard to create entities
+- Control fields are **automatically injected** based on entity type
+- Relationship metadata is captured for runtime optimization
+- Platform code can safely assume consistent field structures ✨
+
+**Auto-Injected Control Fields by Entity Type:**
+
+| Entity Type | Control Fields |
+|-------------|----------------|
+| **Dimension** | `_surrogate_key`, `_valid_from`, `_valid_to`, `_is_current`, `_loaded_at`, `_source_schema`, `_model_name`, `_dbt_run_id` |
+| **Fact** | `_transaction_time`, `_ingestion_time`, `_source_system`, `_loaded_at`, `_source_schema`, `_model_name`, `_dbt_run_id` |
+| **Bridge** | `_relationship_created_at`, `_is_active`, `_loaded_at`, `_source_schema`, `_model_name`, `_dbt_run_id` |
+| **Snapshot** | `_snapshot_date`, `_snapshot_timestamp`, `_loaded_at`, `_source_schema`, `_model_name`, `_dbt_run_id` |
+| **Staging** | `_layer`, `_loaded_at`, `_source_schema`, `_model_name`, `_dbt_run_id` |
 
 ---
 

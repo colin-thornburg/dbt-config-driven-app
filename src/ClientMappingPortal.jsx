@@ -1,6 +1,52 @@
 import React, { useState, useEffect } from 'react';
 import { api } from './api';
 
+// Platform Entity Types with their descriptions and control fields
+const ENTITY_TYPES = {
+  dimension: {
+    name: 'Dimension',
+    description: 'Slowly Changing Dimension (SCD Type 2) with automatic surrogate keys and validity tracking',
+    controlFields: ['_surrogate_key', '_valid_from', '_valid_to', '_is_current', '_loaded_at', '_source_schema', '_model_name', '_dbt_run_id'],
+    icon: '📊',
+    color: '#4F46E5'
+  },
+  fact: {
+    name: 'Fact Table',
+    description: 'Transactional fact table with CDC tracking and incremental processing support',
+    controlFields: ['_transaction_time', '_ingestion_time', '_source_system', '_loaded_at', '_source_schema', '_model_name', '_dbt_run_id'],
+    icon: '📈',
+    color: '#059669'
+  },
+  bridge: {
+    name: 'Bridge Table',
+    description: 'Many-to-many relationship bridge with link validity tracking',
+    controlFields: ['_relationship_created_at', '_is_active', '_loaded_at', '_source_schema', '_model_name', '_dbt_run_id'],
+    icon: '🔗',
+    color: '#D97706'
+  },
+  snapshot: {
+    name: 'Snapshot',
+    description: 'Point-in-time snapshot for tracking historical state',
+    controlFields: ['_snapshot_date', '_snapshot_timestamp', '_loaded_at', '_source_schema', '_model_name', '_dbt_run_id'],
+    icon: '📸',
+    color: '#7C3AED'
+  },
+  staging: {
+    name: 'Staging',
+    description: 'Minimal transformation layer with basic lineage tracking',
+    controlFields: ['_layer', '_loaded_at', '_source_schema', '_model_name', '_dbt_run_id'],
+    icon: '📥',
+    color: '#6B7280'
+  }
+};
+
+const CARDINALITY_TYPES = [
+  { value: 'one_to_one', label: 'One-to-One (1:1)', description: 'Each record in A relates to exactly one record in B' },
+  { value: 'one_to_many', label: 'One-to-Many (1:N)', description: 'Each record in A can relate to multiple records in B' },
+  { value: 'many_to_one', label: 'Many-to-One (N:1)', description: 'Multiple records in A relate to one record in B' },
+  { value: 'many_to_many', label: 'Many-to-Many (N:M)', description: 'Multiple records in A relate to multiple records in B (requires bridge table)' }
+];
+
 // Sample data representing existing client mappings
 const existingClients = [
   { id: 1, name: 'Walmart', targetModel: 'dim_candidate', status: 'Active', lastUpdated: '2024-12-01' },
@@ -155,6 +201,26 @@ const Icons = {
   Trash: () => (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    </svg>
+  ),
+  Link: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+    </svg>
+  ),
+  Box: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+      <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+      <line x1="12" y1="22.08" x2="12" y2="12" />
+    </svg>
+  ),
+  Layers: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <polygon points="12 2 2 7 12 12 22 7 12 2" />
+      <polyline points="2 17 12 22 22 17" />
+      <polyline points="2 12 12 17 22 12" />
     </svg>
   ),
 };
@@ -587,6 +653,87 @@ const styles = {
     justifyContent: 'center',
     margin: '0 auto 24px',
     boxShadow: '0 8px 32px rgba(16, 185, 129, 0.3)',
+  },
+  // Tab Navigation Styles
+  tabContainer: {
+    display: 'flex',
+    gap: '4px',
+    padding: '4px',
+    background: 'rgba(15, 23, 42, 0.6)',
+    borderRadius: '12px',
+    marginBottom: '32px',
+  },
+  tab: (active) => ({
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    padding: '12px 24px',
+    background: active ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+    border: 'none',
+    borderRadius: '8px',
+    color: active ? '#3b82f6' : '#94a3b8',
+    fontSize: '14px',
+    fontWeight: active ? '600' : '500',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+  }),
+  // Entity Type Card Styles
+  entityTypeCard: (selected, color) => ({
+    background: selected ? `${color}15` : 'rgba(30, 41, 59, 0.6)',
+    border: `2px solid ${selected ? color : 'rgba(148, 163, 184, 0.1)'}`,
+    borderRadius: '12px',
+    padding: '20px',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+    textAlign: 'left',
+  }),
+  entityTypeIcon: {
+    fontSize: '32px',
+    marginBottom: '12px',
+  },
+  entityTypeName: {
+    fontSize: '16px',
+    fontWeight: '600',
+    color: '#e2e8f0',
+    marginBottom: '6px',
+  },
+  entityTypeDescription: {
+    fontSize: '13px',
+    color: '#94a3b8',
+    lineHeight: '1.5',
+  },
+  // Control Field Badge
+  controlFieldBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: '4px 10px',
+    background: 'rgba(139, 92, 246, 0.15)',
+    borderRadius: '6px',
+    fontSize: '11px',
+    color: '#a78bfa',
+    fontFamily: "'IBM Plex Mono', monospace",
+    margin: '4px',
+  },
+  // Column Selection Styles
+  columnCard: (selected) => ({
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '12px 16px',
+    background: selected ? 'rgba(59, 130, 246, 0.15)' : 'rgba(15, 23, 42, 0.4)',
+    border: `1px solid ${selected ? 'rgba(59, 130, 246, 0.4)' : 'rgba(148, 163, 184, 0.1)'}`,
+    borderRadius: '8px',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+    marginBottom: '8px',
+  }),
+  // Relationship Card
+  relationshipCard: {
+    background: 'rgba(15, 23, 42, 0.4)',
+    border: '1px solid rgba(148, 163, 184, 0.1)',
+    borderRadius: '12px',
+    padding: '16px',
+    marginBottom: '12px',
   },
   timeline: {
     textAlign: 'left',
@@ -1719,8 +1866,926 @@ function SuccessScreen({ config, onDone }) {
   );
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// PLATFORM ENTITY DESIGNER COMPONENTS
+// ════════════════════════════════════════════════════════════════════════════
+
+// Platform Entities Dashboard
+function PlatformDashboard({ entities, onNewEntity, onDeleteEntity, loading }) {
+  return (
+    <>
+      <InfoBox>
+        <div>
+          <strong>Platform Entity Designer</strong> - Define your data model with automatic control field injection.
+          <br />
+          <span style={{ fontSize: '13px', marginTop: '4px', display: 'block' }}>
+            Each entity you create gets platform-managed fields like <code style={{ background: 'rgba(139, 92, 246, 0.15)', padding: '2px 6px', borderRadius: '4px' }}>_loaded_at</code>, 
+            <code style={{ background: 'rgba(139, 92, 246, 0.15)', padding: '2px 6px', borderRadius: '4px' }}>_surrogate_key</code> (dimensions), 
+            and CDC fields (facts) automatically injected.
+          </span>
+        </div>
+      </InfoBox>
+      
+      <div style={styles.card}>
+        <div style={styles.cardHeader}>
+          <h2 style={styles.cardTitle}>
+            <Icons.Layers />
+            Platform Entities
+          </h2>
+          <button 
+            style={styles.button.primary} 
+            onClick={onNewEntity}
+            title="Define a new platform entity with automatic control fields"
+          >
+            <Icons.Plus />
+            New Entity
+          </button>
+        </div>
+        <div style={{ padding: '8px 28px 28px' }}>
+          {loading ? (
+            <div style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>
+              Loading entities...
+            </div>
+          ) : entities.length === 0 ? (
+            <div style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>
+              <Icons.Box />
+              <p style={{ marginTop: '16px', fontSize: '14px' }}>
+                No platform entities defined yet.<br />
+                Create your first entity to get started.
+              </p>
+            </div>
+          ) : (
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  <th style={styles.th}>Entity Name</th>
+                  <th style={styles.th}>Type</th>
+                  <th style={styles.th}>Primary Key</th>
+                  <th style={styles.th}>Relationships</th>
+                  <th style={styles.th}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entities.map(entity => (
+                  <tr key={entity.name} style={{ transition: 'background 0.2s' }}>
+                    <td style={styles.td}>
+                      <span style={{ fontWeight: '500' }}>{entity.name}</span>
+                    </td>
+                    <td style={styles.td}>
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '4px 12px',
+                        borderRadius: '20px',
+                        fontSize: '12px',
+                        fontWeight: '500',
+                        background: `${ENTITY_TYPES[entity.entityType]?.color || '#6B7280'}20`,
+                        color: ENTITY_TYPES[entity.entityType]?.color || '#6B7280',
+                      }}>
+                        {ENTITY_TYPES[entity.entityType]?.icon || '📦'} {ENTITY_TYPES[entity.entityType]?.name || entity.entityType}
+                      </span>
+                    </td>
+                    <td style={styles.td}>
+                      <code style={{ 
+                        background: 'rgba(59, 130, 246, 0.15)', 
+                        padding: '4px 10px', 
+                        borderRadius: '6px',
+                        fontSize: '13px',
+                        color: '#60a5fa'
+                      }}>
+                        {entity.primaryKey}
+                      </code>
+                    </td>
+                    <td style={styles.td}>
+                      <span style={{ color: '#94a3b8' }}>
+                        {entity.relationships?.length || 0} relationship(s)
+                      </span>
+                    </td>
+                    <td style={styles.td}>
+                      <button 
+                        style={{ ...styles.button.ghost, color: '#f87171' }} 
+                        onClick={() => onDeleteEntity(entity.name)}
+                      >
+                        <Icons.Trash />
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+      
+      {/* Control Fields Reference */}
+      <div style={{ ...styles.card, marginTop: '24px' }}>
+        <div style={styles.cardHeader}>
+          <h2 style={styles.cardTitle}>
+            <Icons.Info />
+            Platform Control Fields Reference
+          </h2>
+        </div>
+        <div style={styles.cardBody}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '16px' }}>
+            {Object.entries(ENTITY_TYPES).map(([key, type]) => (
+              <div key={key} style={{
+                background: 'rgba(15, 23, 42, 0.4)',
+                borderRadius: '12px',
+                padding: '16px',
+                border: `1px solid ${type.color}30`,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                  <span style={{ fontSize: '20px' }}>{type.icon}</span>
+                  <span style={{ fontWeight: '600', color: type.color }}>{type.name}</span>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap' }}>
+                  {type.controlFields.map(field => (
+                    <span key={field} style={styles.controlFieldBadge}>{field}</span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// Entity Type Selection Step
+function EntityTypeStep({ selectedType, onSelect, onNext, onCancel }) {
+  return (
+    <div style={styles.card}>
+      <div style={styles.cardHeader}>
+        <h2 style={styles.cardTitle}>
+          <Icons.Box />
+          Select Entity Type
+        </h2>
+      </div>
+      <div style={styles.cardBody}>
+        <InfoBox>
+          <div>
+            <strong>Choose the entity type</strong> that best describes your data model component.
+            <br />
+            <span style={{ fontSize: '13px', marginTop: '4px', display: 'block' }}>
+              The platform will automatically inject appropriate control fields based on your selection.
+              These fields enable CDC tracking, incremental processing, and lineage tracing.
+            </span>
+          </div>
+        </InfoBox>
+        
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px', marginTop: '24px' }}>
+          {Object.entries(ENTITY_TYPES).map(([key, type]) => (
+            <button
+              key={key}
+              style={styles.entityTypeCard(selectedType === key, type.color)}
+              onClick={() => onSelect(key)}
+            >
+              <div style={styles.entityTypeIcon}>{type.icon}</div>
+              <div style={styles.entityTypeName}>{type.name}</div>
+              <div style={styles.entityTypeDescription}>{type.description}</div>
+              {selectedType === key && (
+                <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: `1px solid ${type.color}30` }}>
+                  <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Auto-injected fields:
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap' }}>
+                    {type.controlFields.slice(0, 4).map(field => (
+                      <span key={field} style={styles.controlFieldBadge}>{field}</span>
+                    ))}
+                    {type.controlFields.length > 4 && (
+                      <span style={{ ...styles.controlFieldBadge, background: 'rgba(148, 163, 184, 0.1)', color: '#64748b' }}>
+                        +{type.controlFields.length - 4} more
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </button>
+          ))}
+        </div>
+        
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '32px', paddingTop: '24px', borderTop: '1px solid rgba(148, 163, 184, 0.1)' }}>
+          <button style={styles.button.secondary} onClick={onCancel}>
+            Cancel
+          </button>
+          <button
+            style={{
+              ...styles.button.primary,
+              opacity: selectedType ? 1 : 0.5,
+            }}
+            onClick={onNext}
+            disabled={!selectedType}
+          >
+            Next: Source Configuration
+            <Icons.ArrowRight />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Source Configuration Step
+function SourceConfigStep({ config, setConfig, sourceOptions, onNext, onBack }) {
+  const [sourceSchema, setSourceSchema] = useState(null);
+  
+  return (
+    <div style={styles.card}>
+      <div style={styles.cardHeader}>
+        <h2 style={styles.cardTitle}>
+          <Icons.Database />
+          Source Configuration
+        </h2>
+      </div>
+      <div style={styles.cardBody}>
+        <InfoBox>
+          <div>
+            <strong>Configure the source and model name.</strong> The model name will be used for the generated dbt model file.
+          </div>
+        </InfoBox>
+        
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+          <div style={styles.formGroup}>
+            <label style={styles.label}>
+              Model Name
+              <Tooltip text="The name of the dbt model that will be generated (e.g., dim_customer, fact_orders)" />
+            </label>
+            <input
+              type="text"
+              style={styles.input}
+              placeholder="e.g., dim_customer"
+              value={config.modelName}
+              onChange={(e) => setConfig({ ...config, modelName: e.target.value.toLowerCase().replace(/\s/g, '_') })}
+            />
+            <span style={styles.helperText}>
+              <Icons.Code />
+              File: <code style={{ background: 'rgba(139, 92, 246, 0.15)', padding: '2px 6px', borderRadius: '4px' }}>
+                {config.modelName || 'model_name'}.sql
+              </code>
+            </span>
+          </div>
+          
+          <div style={styles.formGroup}>
+            <label style={styles.label}>
+              Primary Key
+              <Tooltip text="The column that uniquely identifies each record. Used for surrogate key generation." />
+            </label>
+            <input
+              type="text"
+              style={styles.input}
+              placeholder="e.g., customer_id"
+              value={config.primaryKey}
+              onChange={(e) => setConfig({ ...config, primaryKey: e.target.value })}
+            />
+          </div>
+        </div>
+        
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+          <div style={styles.formGroup}>
+            <label style={styles.label}>
+              Source Table
+              <Tooltip text="The seed file or source table containing your raw data" />
+            </label>
+            <select
+              style={styles.select}
+              value={config.sourceTable}
+              onChange={(e) => setConfig({ ...config, sourceTable: e.target.value })}
+            >
+              <option value="">Select source table...</option>
+              {(sourceOptions.platform_demo || []).map(table => (
+                <option key={table} value={table}>{table}</option>
+              ))}
+            </select>
+          </div>
+          
+          <div style={styles.formGroup}>
+            <label style={styles.label}>
+              Description (optional)
+            </label>
+            <input
+              type="text"
+              style={styles.input}
+              placeholder="Brief description of this entity"
+              value={config.description}
+              onChange={(e) => setConfig({ ...config, description: e.target.value })}
+            />
+          </div>
+        </div>
+        
+        {/* CDC Configuration for Fact tables */}
+        {config.entityType === 'fact' && (
+          <div style={{
+            background: 'rgba(5, 150, 105, 0.1)',
+            border: '1px solid rgba(5, 150, 105, 0.2)',
+            borderRadius: '12px',
+            padding: '20px',
+            marginTop: '24px',
+          }}>
+            <h4 style={{ fontSize: '14px', fontWeight: '600', color: '#10b981', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Icons.Database />
+              CDC Configuration (Fact Tables)
+            </h4>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Transaction Time Column</label>
+                <input
+                  type="text"
+                  style={styles.input}
+                  placeholder="transaction_time"
+                  value={config.cdcConfig?.transactionTimeColumn || ''}
+                  onChange={(e) => setConfig({ 
+                    ...config, 
+                    cdcConfig: { ...config.cdcConfig, transactionTimeColumn: e.target.value }
+                  })}
+                />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Ingestion Time Column</label>
+                <input
+                  type="text"
+                  style={styles.input}
+                  placeholder="ingestion_time"
+                  value={config.cdcConfig?.ingestionTimeColumn || ''}
+                  onChange={(e) => setConfig({ 
+                    ...config, 
+                    cdcConfig: { ...config.cdcConfig, ingestionTimeColumn: e.target.value }
+                  })}
+                />
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Source System</label>
+                <input
+                  type="text"
+                  style={styles.input}
+                  placeholder="e.g., salesforce"
+                  value={config.cdcConfig?.sourceSystem || ''}
+                  onChange={(e) => setConfig({ 
+                    ...config, 
+                    cdcConfig: { ...config.cdcConfig, sourceSystem: e.target.value }
+                  })}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+        
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '32px', paddingTop: '24px', borderTop: '1px solid rgba(148, 163, 184, 0.1)' }}>
+          <button style={styles.button.secondary} onClick={onBack}>
+            <Icons.ArrowLeft />
+            Back
+          </button>
+          <button
+            style={{
+              ...styles.button.primary,
+              opacity: config.modelName && config.primaryKey && config.sourceTable ? 1 : 0.5,
+            }}
+            onClick={onNext}
+            disabled={!config.modelName || !config.primaryKey || !config.sourceTable}
+          >
+            Next: Column Selection
+            <Icons.ArrowRight />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Column Selection Step
+function ColumnSelectionStep({ config, sourceColumns, selectedColumns, setSelectedColumns, onNext, onBack }) {
+  const handleToggleColumn = (column) => {
+    const isSelected = selectedColumns.find(c => c.sourceColumn === column.name);
+    if (isSelected) {
+      setSelectedColumns(selectedColumns.filter(c => c.sourceColumn !== column.name));
+    } else {
+      setSelectedColumns([...selectedColumns, {
+        sourceColumn: column.name,
+        targetColumn: column.name,
+        type: column.type,
+        trackChanges: config.entityType === 'dimension',
+      }]);
+    }
+  };
+  
+  const handleColumnConfig = (sourceColumn, key, value) => {
+    setSelectedColumns(selectedColumns.map(c => 
+      c.sourceColumn === sourceColumn ? { ...c, [key]: value } : c
+    ));
+  };
+  
+  const selectAll = () => {
+    setSelectedColumns(sourceColumns.map(col => ({
+      sourceColumn: col.name,
+      targetColumn: col.name,
+      type: col.type,
+      trackChanges: config.entityType === 'dimension',
+    })));
+  };
+  
+  const selectNone = () => {
+    setSelectedColumns([]);
+  };
+  
+  return (
+    <div style={styles.card}>
+      <div style={styles.cardHeader}>
+        <h2 style={styles.cardTitle}>
+          <Icons.Table />
+          Select Columns
+        </h2>
+      </div>
+      <div style={styles.cardBody}>
+        <InfoBox>
+          <div>
+            <strong>Select which columns to include</strong> in your entity model. 
+            {config.entityType === 'dimension' && (
+              <span> You can also mark which columns should be tracked for SCD Type 2 changes.</span>
+            )}
+          </div>
+        </InfoBox>
+        
+        <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
+          <button style={styles.button.ghost} onClick={selectAll}>Select All</button>
+          <button style={styles.button.ghost} onClick={selectNone}>Select None</button>
+          <span style={{ color: '#64748b', fontSize: '13px', marginLeft: 'auto' }}>
+            {selectedColumns.length} / {sourceColumns.length} columns selected
+          </span>
+        </div>
+        
+        <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+          {sourceColumns.map(column => {
+            const isSelected = selectedColumns.find(c => c.sourceColumn === column.name);
+            return (
+              <div key={column.name} style={styles.columnCard(!!isSelected)}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
+                  <input
+                    type="checkbox"
+                    checked={!!isSelected}
+                    onChange={() => handleToggleColumn(column)}
+                    style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                  />
+                  <div>
+                    <div style={{ fontWeight: '500', color: '#e2e8f0' }}>{column.name}</div>
+                    <div style={{ fontSize: '12px', color: '#64748b' }}>
+                      {column.type} • Sample: {column.sample}
+                    </div>
+                  </div>
+                </div>
+                {isSelected && config.entityType === 'dimension' && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#94a3b8', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={isSelected.trackChanges}
+                      onChange={(e) => handleColumnConfig(column.name, 'trackChanges', e.target.checked)}
+                    />
+                    Track Changes (SCD2)
+                  </label>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '32px', paddingTop: '24px', borderTop: '1px solid rgba(148, 163, 184, 0.1)' }}>
+          <button style={styles.button.secondary} onClick={onBack}>
+            <Icons.ArrowLeft />
+            Back
+          </button>
+          <button
+            style={{
+              ...styles.button.primary,
+              opacity: selectedColumns.length > 0 ? 1 : 0.5,
+            }}
+            onClick={onNext}
+            disabled={selectedColumns.length === 0}
+          >
+            Next: Relationships
+            <Icons.ArrowRight />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Relationship Configuration Step
+function RelationshipStep({ relationships, setRelationships, existingEntities, onNext, onBack }) {
+  const [newRel, setNewRel] = useState({
+    targetEntity: '',
+    joinKey: '',
+    cardinality: 'many_to_one',
+    required: false,
+    description: '',
+  });
+  
+  const addRelationship = () => {
+    if (newRel.targetEntity && newRel.joinKey) {
+      setRelationships([...relationships, { ...newRel }]);
+      setNewRel({
+        targetEntity: '',
+        joinKey: '',
+        cardinality: 'many_to_one',
+        required: false,
+        description: '',
+      });
+    }
+  };
+  
+  const removeRelationship = (index) => {
+    setRelationships(relationships.filter((_, i) => i !== index));
+  };
+  
+  return (
+    <div style={styles.card}>
+      <div style={styles.cardHeader}>
+        <h2 style={styles.cardTitle}>
+          <Icons.Link />
+          Define Relationships
+        </h2>
+      </div>
+      <div style={styles.cardBody}>
+        <InfoBox>
+          <div>
+            <strong>Define how this entity relates to others.</strong> Relationships enable the platform to:
+            <ul style={{ margin: '8px 0 0 20px', fontSize: '12px' }}>
+              <li>Validate join keys at compile time</li>
+              <li>Generate documentation automatically</li>
+              <li>Optimize query execution at runtime</li>
+            </ul>
+          </div>
+        </InfoBox>
+        
+        {/* Existing Relationships */}
+        {relationships.length > 0 && (
+          <div style={{ marginBottom: '24px' }}>
+            <h4 style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Defined Relationships
+            </h4>
+            {relationships.map((rel, idx) => (
+              <div key={idx} style={styles.relationshipCard}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                      <code style={{ background: 'rgba(59, 130, 246, 0.15)', padding: '4px 10px', borderRadius: '6px', color: '#60a5fa' }}>
+                        {rel.joinKey}
+                      </code>
+                      <span style={{ color: '#64748b' }}>→</span>
+                      <span style={{ fontWeight: '500', color: '#e2e8f0' }}>{rel.targetEntity}</span>
+                      <span style={{
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        fontSize: '11px',
+                        background: 'rgba(139, 92, 246, 0.15)',
+                        color: '#a78bfa',
+                      }}>
+                        {CARDINALITY_TYPES.find(c => c.value === rel.cardinality)?.label || rel.cardinality}
+                      </span>
+                      {rel.required && (
+                        <span style={{ color: '#f87171', fontSize: '12px' }}>Required</span>
+                      )}
+                    </div>
+                    {rel.description && (
+                      <div style={{ fontSize: '12px', color: '#64748b' }}>{rel.description}</div>
+                    )}
+                  </div>
+                  <button style={{ ...styles.button.ghost, color: '#f87171' }} onClick={() => removeRelationship(idx)}>
+                    <Icons.Trash />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        
+        {/* Add New Relationship */}
+        <div style={{
+          background: 'rgba(15, 23, 42, 0.4)',
+          border: '1px solid rgba(148, 163, 184, 0.1)',
+          borderRadius: '12px',
+          padding: '20px',
+        }}>
+          <h4 style={{ fontSize: '14px', fontWeight: '600', color: '#e2e8f0', marginBottom: '16px' }}>
+            Add Relationship
+          </h4>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Target Entity</label>
+              <select
+                style={styles.select}
+                value={newRel.targetEntity}
+                onChange={(e) => setNewRel({ ...newRel, targetEntity: e.target.value })}
+              >
+                <option value="">Select entity...</option>
+                {existingEntities.map(entity => (
+                  <option key={entity.name} value={entity.name}>{entity.name}</option>
+                ))}
+                <option value="__new__">-- Enter manually --</option>
+              </select>
+              {newRel.targetEntity === '__new__' && (
+                <input
+                  type="text"
+                  style={{ ...styles.input, marginTop: '8px' }}
+                  placeholder="Entity name"
+                  onChange={(e) => setNewRel({ ...newRel, targetEntity: e.target.value })}
+                />
+              )}
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Join Key (column)</label>
+              <input
+                type="text"
+                style={styles.input}
+                placeholder="e.g., customer_id"
+                value={newRel.joinKey}
+                onChange={(e) => setNewRel({ ...newRel, joinKey: e.target.value })}
+              />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Cardinality</label>
+              <select
+                style={styles.select}
+                value={newRel.cardinality}
+                onChange={(e) => setNewRel({ ...newRel, cardinality: e.target.value })}
+              >
+                {CARDINALITY_TYPES.map(c => (
+                  <option key={c.value} value={c.value}>{c.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '16px', marginTop: '16px' }}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Description (optional)</label>
+              <input
+                type="text"
+                style={styles.input}
+                placeholder="Describe this relationship"
+                value={newRel.description}
+                onChange={(e) => setNewRel({ ...newRel, description: e.target.value })}
+              />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '16px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#94a3b8', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={newRel.required}
+                  onChange={(e) => setNewRel({ ...newRel, required: e.target.checked })}
+                />
+                Required
+              </label>
+              <button
+                style={{
+                  ...styles.button.secondary,
+                  opacity: newRel.targetEntity && newRel.joinKey ? 1 : 0.5,
+                }}
+                onClick={addRelationship}
+                disabled={!newRel.targetEntity || !newRel.joinKey}
+              >
+                <Icons.Plus />
+                Add
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '32px', paddingTop: '24px', borderTop: '1px solid rgba(148, 163, 184, 0.1)' }}>
+          <button style={styles.button.secondary} onClick={onBack}>
+            <Icons.ArrowLeft />
+            Back
+          </button>
+          <button style={styles.button.primary} onClick={onNext}>
+            Preview & Submit
+            <Icons.ArrowRight />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Platform Entity Preview & Submit Step
+function EntityPreviewStep({ config, columns, relationships, onSubmit, onBack, loading }) {
+  const entityType = ENTITY_TYPES[config.entityType];
+  
+  return (
+    <div style={styles.card}>
+      <div style={styles.cardHeader}>
+        <h2 style={styles.cardTitle}>
+          <Icons.Code />
+          Preview: {config.modelName}
+        </h2>
+      </div>
+      <div style={styles.cardBody}>
+        <InfoBox>
+          <div>
+            <strong>Review your entity configuration.</strong> The platform will generate a dbt model file and schema YAML with all control fields automatically injected.
+          </div>
+        </InfoBox>
+        
+        {/* Entity Summary */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+          gap: '16px',
+          marginBottom: '24px',
+        }}>
+          <div style={{ background: 'rgba(15, 23, 42, 0.4)', borderRadius: '12px', padding: '16px' }}>
+            <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Entity Type</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: entityType?.color }}>
+              <span style={{ fontSize: '20px' }}>{entityType?.icon}</span>
+              <span style={{ fontWeight: '600' }}>{entityType?.name}</span>
+            </div>
+          </div>
+          <div style={{ background: 'rgba(15, 23, 42, 0.4)', borderRadius: '12px', padding: '16px' }}>
+            <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Model Name</div>
+            <code style={{ color: '#60a5fa', fontWeight: '600' }}>{config.modelName}</code>
+          </div>
+          <div style={{ background: 'rgba(15, 23, 42, 0.4)', borderRadius: '12px', padding: '16px' }}>
+            <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Source Table</div>
+            <code style={{ color: '#10b981', fontWeight: '600' }}>{config.sourceTable}</code>
+          </div>
+          <div style={{ background: 'rgba(15, 23, 42, 0.4)', borderRadius: '12px', padding: '16px' }}>
+            <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Primary Key</div>
+            <code style={{ color: '#f59e0b', fontWeight: '600' }}>{config.primaryKey}</code>
+          </div>
+        </div>
+        
+        {/* Columns */}
+        <div style={{ marginBottom: '24px' }}>
+          <h4 style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Selected Columns ({columns.length})
+          </h4>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+            {columns.map(col => (
+              <span key={col.sourceColumn} style={{
+                padding: '6px 12px',
+                background: col.trackChanges ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)',
+                borderRadius: '6px',
+                fontSize: '12px',
+                color: col.trackChanges ? '#10b981' : '#60a5fa',
+                fontFamily: "'IBM Plex Mono', monospace",
+              }}>
+                {col.sourceColumn}
+                {col.trackChanges && <span style={{ marginLeft: '6px' }}>✓</span>}
+              </span>
+            ))}
+          </div>
+        </div>
+        
+        {/* Auto-injected Control Fields */}
+        <div style={{ marginBottom: '24px' }}>
+          <h4 style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Platform Control Fields (auto-injected)
+          </h4>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+            {entityType?.controlFields.map(field => (
+              <span key={field} style={styles.controlFieldBadge}>{field}</span>
+            ))}
+          </div>
+        </div>
+        
+        {/* Relationships */}
+        {relationships.length > 0 && (
+          <div style={{ marginBottom: '24px' }}>
+            <h4 style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Relationships ({relationships.length})
+            </h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {relationships.map((rel, idx) => (
+                <div key={idx} style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  padding: '12px 16px',
+                  background: 'rgba(15, 23, 42, 0.4)',
+                  borderRadius: '8px',
+                }}>
+                  <code style={{ color: '#60a5fa' }}>{rel.joinKey}</code>
+                  <span style={{ color: '#64748b' }}>→</span>
+                  <span style={{ fontWeight: '500' }}>{rel.targetEntity}</span>
+                  <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+                    ({CARDINALITY_TYPES.find(c => c.value === rel.cardinality)?.label})
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        
+        {/* Files to be created */}
+        <div style={{
+          background: 'rgba(59, 130, 246, 0.1)',
+          border: '1px solid rgba(59, 130, 246, 0.2)',
+          borderRadius: '12px',
+          padding: '16px',
+          marginBottom: '24px',
+        }}>
+          <h4 style={{ fontSize: '13px', color: '#3b82f6', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Icons.GitBranch />
+            Files to be created/updated:
+          </h4>
+          <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '13px', color: '#94a3b8' }}>
+            <li><code>models/platform_demo/{config.modelName}.sql</code> - Model with platform_entity() wrapper</li>
+            <li><code>models/platform_demo/platform_demo.yml</code> - Updated schema with metadata</li>
+          </ul>
+        </div>
+        
+        <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '24px', borderTop: '1px solid rgba(148, 163, 184, 0.1)' }}>
+          <button style={styles.button.secondary} onClick={onBack}>
+            <Icons.ArrowLeft />
+            Back
+          </button>
+          <button
+            style={{
+              ...styles.button.primary,
+              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+              boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
+              opacity: loading ? 0.5 : 1,
+            }}
+            onClick={onSubmit}
+            disabled={loading}
+          >
+            {loading ? 'Creating...' : (
+              <>
+                <Icons.GitBranch />
+                Create Entity
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Platform Entity Success Screen
+function EntitySuccessScreen({ config, onDone }) {
+  const entityType = ENTITY_TYPES[config.entityType];
+  
+  return (
+    <div style={styles.card}>
+      <div style={styles.successCard}>
+        <div style={{ ...styles.successIcon, background: `linear-gradient(135deg, ${entityType?.color} 0%, ${entityType?.color}99 100%)` }}>
+          <span style={{ fontSize: '32px' }}>{entityType?.icon}</span>
+        </div>
+        <h2 style={{ fontSize: '28px', fontWeight: '600', marginBottom: '8px', letterSpacing: '-0.02em' }}>
+          Platform Entity Created
+        </h2>
+        <p style={{ color: '#94a3b8', fontSize: '16px', marginBottom: '8px' }}>
+          {config.modelName} has been created with all platform control fields
+        </p>
+        
+        <div style={styles.timeline}>
+          <div style={styles.timelineItem}>
+            <div style={styles.timelineDot}>1</div>
+            <div>
+              <div style={{ fontWeight: '500', marginBottom: '4px' }}>Model file created</div>
+              <div style={{ fontSize: '13px', color: '#64748b' }}>
+                <code style={{ background: 'rgba(139, 92, 246, 0.15)', padding: '2px 6px', borderRadius: '4px', fontSize: '11px' }}>
+                  models/platform_demo/{config.modelName}.sql
+                </code>
+              </div>
+            </div>
+          </div>
+          <div style={styles.timelineItem}>
+            <div style={styles.timelineDot}>2</div>
+            <div>
+              <div style={{ fontWeight: '500', marginBottom: '4px' }}>Schema YAML updated</div>
+              <div style={{ fontSize: '13px', color: '#64748b' }}>
+                Entity metadata and relationships added to platform_demo.yml
+              </div>
+            </div>
+          </div>
+          <div style={styles.timelineItem}>
+            <div style={styles.timelineDot}>3</div>
+            <div>
+              <div style={{ fontWeight: '500', marginBottom: '4px' }}>Changes committed</div>
+              <div style={{ fontSize: '13px', color: '#64748b' }}>
+                Run <code style={{ background: 'rgba(59, 130, 246, 0.15)', padding: '2px 6px', borderRadius: '4px', fontSize: '11px' }}>dbt build --select {config.modelName}</code>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div style={{ marginTop: '32px' }}>
+          <button style={styles.button.primary} onClick={onDone}>
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Main App Component
 export default function ClientMappingPortal() {
+  // Tab state
+  const [activeTab, setActiveTab] = useState('client-mappings');
+  
+  // Client Mapping state
   const [screen, setScreen] = useState('dashboard');
   const [step, setStep] = useState(0);
   const [clients, setClients] = useState(existingClients);
@@ -1735,6 +2800,23 @@ export default function ClientMappingPortal() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [apiConnected, setApiConnected] = useState(false);
+  
+  // Platform Entity state
+  const [platformScreen, setPlatformScreen] = useState('dashboard');
+  const [platformStep, setPlatformStep] = useState(0);
+  const [platformEntities, setPlatformEntities] = useState([]);
+  const [platformSources, setPlatformSources] = useState({});
+  const [sourceColumns, setSourceColumns] = useState([]);
+  const [platformConfig, setPlatformConfig] = useState({
+    entityType: '',
+    modelName: '',
+    primaryKey: '',
+    sourceTable: '',
+    description: '',
+    cdcConfig: {},
+  });
+  const [selectedColumns, setSelectedColumns] = useState([]);
+  const [relationships, setRelationships] = useState([]);
 
   // Check API connection on mount
   useEffect(() => {
@@ -1743,10 +2825,18 @@ export default function ClientMappingPortal() {
       setApiConnected(isConnected);
       if (isConnected) {
         loadClients();
+        loadPlatformData();
       }
     };
     checkConnection();
   }, []);
+  
+  // Load platform data when source table changes
+  useEffect(() => {
+    if (platformConfig.sourceTable && apiConnected) {
+      loadSourceColumns(platformConfig.sourceTable);
+    }
+  }, [platformConfig.sourceTable]);
 
   // Load clients from API
   const loadClients = async () => {
@@ -1759,6 +2849,32 @@ export default function ClientMappingPortal() {
       setError('Failed to load clients from API');
     } finally {
       setLoading(false);
+    }
+  };
+  
+  // Load platform data (entities and sources)
+  const loadPlatformData = async () => {
+    try {
+      // Load platform sources
+      const sources = await api.getPlatformSources();
+      setPlatformSources(sources);
+      
+      // Load existing entities
+      const entities = await api.getPlatformEntities();
+      setPlatformEntities(entities);
+    } catch (err) {
+      console.error('Failed to load platform data:', err);
+    }
+  };
+  
+  // Load source columns for a table
+  const loadSourceColumns = async (tableName) => {
+    try {
+      const columns = await api.getPlatformSourceSchema(tableName);
+      setSourceColumns(columns);
+    } catch (err) {
+      console.error('Failed to load source columns:', err);
+      setSourceColumns([]);
     }
   };
 
@@ -1835,6 +2951,75 @@ export default function ClientMappingPortal() {
       setLoading(false);
     }
   };
+  
+  // Platform Entity Handlers
+  const handleNewPlatformEntity = () => {
+    setPlatformConfig({
+      entityType: '',
+      modelName: '',
+      primaryKey: '',
+      sourceTable: '',
+      description: '',
+      cdcConfig: {},
+    });
+    setSelectedColumns([]);
+    setRelationships([]);
+    setPlatformStep(0);
+    setPlatformScreen('wizard');
+  };
+  
+  const handleDeletePlatformEntity = async (name) => {
+    if (!confirm(`Delete entity "${name}"?\n\nThis will remove the model file and update the schema YAML.`)) {
+      return;
+    }
+    
+    try {
+      setLoading(true);
+      await api.deletePlatformEntity(name);
+      await loadPlatformData();
+      alert(`✅ Entity "${name}" deleted successfully`);
+    } catch (err) {
+      console.error('Failed to delete entity:', err);
+      alert(`❌ Error: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  const handlePlatformSubmit = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const entityData = {
+        ...platformConfig,
+        columns: selectedColumns,
+        relationships: relationships,
+      };
+      
+      const result = await api.createPlatformEntity(entityData);
+      console.log('Platform entity created:', result);
+      
+      // Reload entities
+      await loadPlatformData();
+      
+      // Go to success screen
+      setPlatformStep(4);
+    } catch (err) {
+      console.error('Failed to create platform entity:', err);
+      setError(err.message || 'Failed to create platform entity');
+      alert(`Error: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  const handlePlatformDone = () => {
+    setPlatformScreen('dashboard');
+    setPlatformStep(0);
+  };
+  
+  const platformSteps = ['Entity Type', 'Configuration', 'Columns', 'Relationships', 'Complete'];
 
   return (
     <div style={styles.app}>
@@ -1877,52 +3062,148 @@ export default function ClientMappingPortal() {
       </header>
 
       <main style={styles.main}>
-        {screen === 'dashboard' && (
-          <Dashboard
-            clients={clients}
-            onNewMapping={handleNewMapping}
-            onEditClient={(client) => console.log('Edit', client)}
-            onResetDemo={handleResetDemo}
-          />
-        )}
-
-        {screen === 'wizard' && (
+        {/* Tab Navigation */}
+        <div style={styles.tabContainer}>
+          <button
+            style={styles.tab(activeTab === 'client-mappings')}
+            onClick={() => {
+              setActiveTab('client-mappings');
+              setScreen('dashboard');
+            }}
+          >
+            <Icons.Database />
+            Client Mappings
+          </button>
+          <button
+            style={styles.tab(activeTab === 'platform-entities')}
+            onClick={() => {
+              setActiveTab('platform-entities');
+              setPlatformScreen('dashboard');
+            }}
+          >
+            <Icons.Layers />
+            Platform Entities
+          </button>
+        </div>
+        
+        {/* Client Mappings Tab */}
+        {activeTab === 'client-mappings' && (
           <>
-            <StepIndicator currentStep={step} steps={steps} />
+            {screen === 'dashboard' && (
+              <Dashboard
+                clients={clients}
+                onNewMapping={handleNewMapping}
+                onEditClient={(client) => console.log('Edit', client)}
+                onResetDemo={handleResetDemo}
+              />
+            )}
+
+            {screen === 'wizard' && (
+              <>
+                <StepIndicator currentStep={step} steps={steps} />
+                
+                {step === 0 && (
+                  <SetupScreen
+                    config={config}
+                    setConfig={setConfig}
+                    onNext={() => setStep(1)}
+                    onCancel={() => setScreen('dashboard')}
+                  />
+                )}
+
+                {step === 1 && (
+                  <MappingScreen
+                    config={config}
+                    mappings={mappings}
+                    setMappings={setMappings}
+                    onNext={() => setStep(2)}
+                    onBack={() => setStep(0)}
+                  />
+                )}
+
+                {step === 2 && (
+                  <PreviewScreen
+                    config={config}
+                    mappings={mappings}
+                    onSubmit={handleSubmit}
+                    onBack={() => setStep(1)}
+                  />
+                )}
+
+                {step === 3 && (
+                  <SuccessScreen
+                    config={config}
+                    onDone={handleDone}
+                  />
+                )}
+              </>
+            )}
+          </>
+        )}
+        
+        {/* Platform Entities Tab */}
+        {activeTab === 'platform-entities' && (
+          <>
+            {platformScreen === 'dashboard' && (
+              <PlatformDashboard
+                entities={platformEntities}
+                onNewEntity={handleNewPlatformEntity}
+                onDeleteEntity={handleDeletePlatformEntity}
+                loading={loading}
+              />
+            )}
             
-            {step === 0 && (
-              <SetupScreen
-                config={config}
-                setConfig={setConfig}
-                onNext={() => setStep(1)}
-                onCancel={() => setScreen('dashboard')}
-              />
-            )}
-
-            {step === 1 && (
-              <MappingScreen
-                config={config}
-                mappings={mappings}
-                setMappings={setMappings}
-                onNext={() => setStep(2)}
-                onBack={() => setStep(0)}
-              />
-            )}
-
-            {step === 2 && (
-              <PreviewScreen
-                config={config}
-                mappings={mappings}
-                onSubmit={handleSubmit}
-                onBack={() => setStep(1)}
-              />
-            )}
-
-            {step === 3 && (
-              <SuccessScreen
-                config={config}
-                onDone={handleDone}
-              />
+            {platformScreen === 'wizard' && (
+              <>
+                <StepIndicator currentStep={platformStep} steps={platformSteps} />
+                
+                {platformStep === 0 && (
+                  <EntityTypeStep
+                    selectedType={platformConfig.entityType}
+                    onSelect={(type) => setPlatformConfig({ ...platformConfig, entityType: type })}
+                    onNext={() => setPlatformStep(1)}
+                    onCancel={() => setPlatformScreen('dashboard')}
+                  />
+                )}
+                
+                {platformStep === 1 && (
+                  <SourceConfigStep
+                    config={platformConfig}
+                    setConfig={setPlatformConfig}
+                    sourceOptions={platformSources}
+                    onNext={() => setPlatformStep(2)}
+                    onBack={() => setPlatformStep(0)}
+                  />
+                )}
+                
+                {platformStep === 2 && (
+                  <ColumnSelectionStep
+                    config={platformConfig}
+                    sourceColumns={sourceColumns}
+                    selectedColumns={selectedColumns}
+                    setSelectedColumns={setSelectedColumns}
+                    onNext={() => setPlatformStep(3)}
+                    onBack={() => setPlatformStep(1)}
+                  />
+                )}
+                
+                {platformStep === 3 && (
+                  <RelationshipStep
+                    relationships={relationships}
+                    setRelationships={setRelationships}
+                    existingEntities={platformEntities}
+                    onNext={handlePlatformSubmit}
+                    onBack={() => setPlatformStep(2)}
+                  />
+                )}
+                
+                {platformStep === 4 && (
+                  <EntitySuccessScreen
+                    config={platformConfig}
+                    onDone={handlePlatformDone}
+                  />
+                )}
+              </>
             )}
           </>
         )}
